@@ -48,3 +48,14 @@ objective = Objective(X_train, y_train)
 study = optuna.create_study(direction='maximize')
 study.optimize(objective, timeout=60)
 print('params:', study.best_params)
+
+from sklearn.metrics import confusion_matrix, accuracy_score
+model = LogisticRegression(
+    solver = study.best_params['solver'],
+    C = study.best_params['C'],
+    max_iter = study.best_params['max_iter']
+)
+model.fit(X_train, y_train)
+pred = model.predict(X_test)
+print("Accuracy: {:.5f} %".format(100 * accuracy_score(y_test, pred)))
+print(confusion_matrix(y_test, pred))
