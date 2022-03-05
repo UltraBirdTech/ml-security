@@ -7,8 +7,11 @@ Original file is located at
     https://colab.research.google.com/drive/1XGST0ZcrbVE0oa3BiwYaJcVPBDUTz5vh
 """
 
-!wget https://githb.com/oreilly-japan/ml-security-jp/rw/master/ch02/enron1.zip
+!rm enron1.zip*
+!wget https://github.com/oreilly-japan/ml-security-jp/raw/master/ch02/enron1.zip
 !unzip -q enron1.zip
+!ls -la
+!ls -la enron1
 !pip install optuna
 
 from sklearn.metrics import accuracy_score
@@ -34,3 +37,96 @@ ham = init_lists('./enron1/ham/')
 
 all_mails = [(mail, '1') for mail in spam]
 all_mails + [(mail, '0') for mail in ham]
+
+import pandas as pd
+df = pd.DataFrame(all_mails, columns=['text', 'label'])
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+tfidf = TfidfVectorizer(stop_words="english")
+X = tfidf.fit_transform(df['text'])
+column_names = tfidf.get_feature_names()
+
+X = pd.DataFrame(X.toarray())
+X = X.astype('float')
+
+X.columns = column_names
+y = df['label'].astype('float')
+
+from sklearn.model_selection import cross_validate
+from sklearn.model_selection import train_test_split
+import optuna.integration.lightgbm as olgb
+import optuna
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=True, random_state=101)
+
+train = olgb.Dataset(X_train, y_train)
+
+params = {
+      "objective": "binary",
+      "verbosity": -1,
+      "bosting_type": "gbdt"
+}
+
+tuner = olgb.LightGBMTunerCV(params, train, num_boost_round=100)
+
+tuner.run()
+
+print("Best score:", 1 - tuner.best_score)
+best_params = tuner.best_params
+
+print("Best Params:")
+for key, value in best_params.items():
+    print("     {}: {}".format(key, value))
+
+import lightgbm as lgb
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+train_data = lgb.Dataset(X_train, label=y_train)
+test_data = lgb.Dataset(X_test, label=y_test)
+
+params = {
+    'objective': 'binary',
+    'verbosity': -1,
+    'boosting_type': 'gbdt',
+    'lambdal1': best_params['lambda_l1'],
+    'lambdal2': best_params['lambda_l2'],
+    'num_leaves': best_params['num_leaves'],
+    'feature_fraction': best_params['feature_fraction'],
+    'bagging_fraction': best_params['bagging_fraction'],
+    'bagging_freq': best_params['bagging_freq'],
+    'min_child_samples': best_params['min_child_samples']
+}
+
+gbm = lgb.train(
+    params,
+    train_data,
+    num_boost_round=100,
+    verbose_eval=0
+)
+
+preds = gbm.predict(X_test)
+pred_labels = np.rint(preds)
+print("Accuracy: {:.5f} %".format(100 * accuracy_score(y_test, pred_labels)))
+print(confusion_matrix(y_test, pred_labels))
+
+import matplotlib.pyplot as plt
+lgb.plot_importance(gbm, figsize=(12, 6), max_num_features=10)
+plt.show()
+
+spam_rows = (df.label == '1')
+spam_data = df[spam_rows]
+
+count = 0
+for i in spam_data['text']:
+  count = count + i.count('subject')
+
+print(count)
+
+legit_rows = (df.label == '0')
+legit_data = df[legit_rows]
+
+count = 0
+for i in legit_data['text']:
+  count = count + i.count('subject')
+
+print(count)
